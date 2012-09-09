@@ -61,9 +61,7 @@ void write_reg(byte reg, byte value) {
   psg_inactive();
 }
 
-Sd2Card card;
-SdVolume volume;
-SdFile root;
+File ymFile;
 
 void setup() {
   for(int i=2;i<=9;i++) {
@@ -83,43 +81,41 @@ void setup() {
 
   Serial.begin(9600);
 
-  if (!card.init(SPI_HALF_SPEED, CS)) {
-    Serial.println("initialization failed. Things to check:");
-    Serial.println("* is a card is inserted?");
-    Serial.println("* Is your wiring correct?");
-    Serial.println("* did you change the chipSelect pin to match your shield or module?");
-    return;
-  } else {
-   Serial.println("Wiring is correct and a card is present."); 
-  }
-
-// print the type of card
-  Serial.print("\nCard type: ");
-  switch(card.type()) {
-    case SD_CARD_TYPE_SD1:
-      Serial.println("SD1");
-      break;
-    case SD_CARD_TYPE_SD2:
-      Serial.println("SD2");
-      break;
-    case SD_CARD_TYPE_SDHC:
-      Serial.println("SDHC");
-      break;
-    default:
-      Serial.println("Unknown");
-  }
-
-  // Now we will try to open the 'volume'/'partition' - it should be FAT16 or FAT32
-  if (!volume.init(card)) {
-    Serial.println("Could not find FAT16/FAT32 partition.\nMake sure you've formatted the card");
+  if (!SD.begin(CS)) {
+    Serial.println("initialization failed!");
     return;
   }
 
+  ymFile = SD.open("u_loader.ym");
+  if(!ymFile) {
+    Serial.println("Unable to open file");
+    return;
+  }
+  for(int i=0;i<109;i++) {
+    if(ymFile.available()) {
+      ymFile.read();
+    }
+  }
 }
 
 byte count = 0;
 
+byte regs[16];
+
 void loop() {
+  
+  for(int i=0;i<16;i++) {
+    if(ymFile.available()) {
+      regs[i] = ymFile.read();
+    }
+  }
+
+  for(int i=0;i<16;i++) {
+    write_reg(i, regs[i]);
+  }
+
+  delay(20);
+
 //  digitalWrite(13, HIGH);
 //  PORTB=(1<<5);
 //  write_reg(7, 0b00111110);

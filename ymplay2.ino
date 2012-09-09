@@ -61,6 +61,20 @@ void write_reg(byte reg, byte value) {
   psg_inactive();
 }
 
+byte buffer[128];
+volatile byte sdpos = 0;
+volatile byte psgpos = 0;
+
+
+ISR(TIMER1_COMPA_vect)
+{
+  for(int i=0;i<16;i++) {
+    write_reg(i, buffer[(psgpos+i)&0x7f]);
+  }
+  psgpos+=16;
+  psgpos &= 0x7f;
+}
+
 File ymFile;
 
 void setup() {
@@ -81,40 +95,49 @@ void setup() {
 
   Serial.begin(9600);
 
+  pinMode(13, OUTPUT);
+  cli();
+  TCCR1A = 0;        // set entire TCCR1A register to 0
+  TCCR1B = 0;
+  OCR1A = 312;
+  TCCR1B |= (1 << WGM12);
+  TCCR1B |= (1 << CS10);
+  TCCR1B |= (1 << CS12);
+  TIMSK1 |= (1 << OCIE1A);
+  sei();
+
   if (!SD.begin(CS)) {
     Serial.println("initialization failed!");
     return;
   }
 
-  ymFile = SD.open("u_loader.ym");
+  ymFile = SD.open("u_copier.ym");
   if(!ymFile) {
     Serial.println("Unable to open file");
     return;
   }
-  for(int i=0;i<109;i++) {
+  for(int i=0;i<106;i++) {
     if(ymFile.available()) {
       ymFile.read();
     }
   }
 }
 
-byte count = 0;
-
-byte regs[16];
-
-void loop() {
-  
+void read_frame() {
   for(int i=0;i<16;i++) {
     if(ymFile.available()) {
-      regs[i] = ymFile.read();
+      buffer[sdpos&0x7f] = ymFile.read();
+      sdpos++;
+      sdpos &= 0x7f;
     }
   }
+}
 
-  for(int i=0;i<16;i++) {
-    write_reg(i, regs[i]);
+
+void loop() {
+  while(((sdpos+128-psgpos)&0x7f) < 64) {
+    read_frame();
   }
-
-  delay(20);
 
 //  digitalWrite(13, HIGH);
 //  PORTB=(1<<5);

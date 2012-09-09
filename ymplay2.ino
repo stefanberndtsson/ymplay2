@@ -73,15 +73,15 @@ byte count = 0;
 void loop() {
 //  digitalWrite(13, HIGH);
 //  PORTB=(1<<5);
-  write_reg(7, 0b00111110);
+//  write_reg(7, 0b00111110);
 //  PORTB=0;
 //  digitalWrite(13, LOW);
-  write_reg(8, 15);
-  write_reg(0, count);
-  write_reg(1, 0);
-  count += 1;
-  delay(10);
-  if(count == 0) {
-    Serial.println("Looping...");
-  }
+//  write_reg(8, 15);
+//  write_reg(0, count);
+//  write_reg(1, 0);
+//  count += 1;
+//  delay(10);
+//  if(count == 0) {
+//    Serial.println("Looping...");
+//  }
 }

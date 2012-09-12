@@ -61,6 +61,11 @@ void write_reg(byte reg, byte value) {
   psg_inactive();
 }
 
+void clear_all() {
+  for(int i=0;i<16;i++) {
+    write_reg(i, 0);
+  }
+}
 
 File ymFile;
 
@@ -68,6 +73,7 @@ char title[21];
 char author[21];
 char convertor[21];
 byte buffer[128];
+char current_file[12];
 volatile byte sdpos = 0;
 volatile byte psgpos = 0;
 int frames = 0;
@@ -83,11 +89,11 @@ static inline uint8_t read8() {
 }
 
 static inline uint16_t read16() {
-  return (read8()<<8)|read8();
+  return ((uint16_t)read8()<<8)|(uint16_t)read8();
 }
 
 static inline uint32_t read32() {
-  return (read16()<<16)|read16();
+  return ((uint32_t)read16()<<16)|(uint32_t)read16();
 }
 
 static inline void readstr(char *ptr, int maxsize) {
@@ -105,8 +111,23 @@ static inline void readstr(char *ptr, int maxsize) {
   }
 }
 
-void read_header() {
+int read_header() {
+  Serial.print("Checking file: ");
+  Serial.println(ymFile.name());
   // Skip first bits
+  if(read32() != 0x594d3521) { /* YM5! */
+    Serial.println("Not YM5!");
+    return 0;
+  }
+  if(read32() != 0x4c654f6e) { /* LeOn */
+    Serial.println("Not LeOn");
+    return 0;
+  }
+  if(read32() != 0x41724421) { /* ArD! */
+    Serial.println("Not ArD!");
+    return 0;
+  }
+
   ymFile.seek(12);
   frames = read32();
   ymFile.seek(28);
@@ -127,6 +148,49 @@ void read_header() {
   Serial.println(" seconds");
   Serial.print("Loop at: ");
   Serial.println(loop_frame);
+  return 1;
+}
+
+int read_until_ym_or_eod() {
+  File dir;
+  int reached_current = 0;
+
+  dir = SD.open("/");
+
+  /* We should have an open ymFile here, but let's check. */
+  if(!dir) {
+    return 0;
+  }
+
+  /* Since the first file is always going to be the root directory
+   * (or nothing, but then we've failed already), we'll start looping
+   * by opening the next file.
+   */
+  while(true) {
+    ymFile = dir.openNextFile();
+    if(!ymFile) {
+      Serial.println("End of files, exiting...");
+      /* No more files */
+      return 0;
+    }
+    if(current_file[0] == '\0') {
+      reached_current = 1;
+    }
+    if(!reached_current) {
+      if(!strcmp(ymFile.name(), current_file)) {
+	/* We reached current file, skipping that and going for next */
+	reached_current = 1;
+      }
+      continue;
+    }
+    if(!ymFile.isDirectory() && read_header()) {
+      /* Found one, let's play it */
+      Serial.print("Found file: ");
+      Serial.println(ymFile.name());
+      strcpy(current_file, ymFile.name());
+      return 1;
+    }
+  }
 }
 
 
@@ -138,6 +202,8 @@ ISR(TIMER1_COMPA_vect)
   psgpos+=16;
   psgpos &= 0x7f;
 }
+
+void printDirectory(File, int);
 
 void setup() {
   for(int i=2;i<=9;i++) {
@@ -173,13 +239,9 @@ void setup() {
     return;
   }
 
-  ymFile = SD.open("u_copier.ym");
-  if(!ymFile) {
-    Serial.println("Unable to open file");
-    return;
-  }
+  current_file[0] = '\0';
 
-  read_header();
+  read_until_ym_or_eod();
 }
 
 void read_frame() {
@@ -192,8 +254,18 @@ void read_frame() {
   }
   frames_loaded++;
   if(frames_loaded >= frames) {
-    frames_loaded = loop_frame;
-    ymFile.seek(data_start+16*loop_frame);
+    /* Look for next file */
+    clear_all();
+    if(!read_until_ym_or_eod()) {
+      current_file[0] = '\0';
+      read_until_ym_or_eod();
+    } else {
+      Serial.print("New file open: ");
+      Serial.println(ymFile.name());
+      Serial.println(current_file);
+    }
+    //    frames_loaded = loop_frame;
+    //    ymFile.seek(data_start+16*loop_frame);
   }
 }
 

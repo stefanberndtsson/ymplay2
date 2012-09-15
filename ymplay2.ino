@@ -7,6 +7,10 @@ int psgbdir = A1;
 #define MOSI 11
 #define MISO 12
 #define SCK 13
+#define BUTTON_NEXT A3
+#define BUTTON_PREV A4
+
+byte last_written_regs[16];
 
 static inline void psg_inactive() {
   PORTC=0;
@@ -54,20 +58,19 @@ static inline void psg_write_data(byte value) {
 }
 
 void write_reg(byte reg, byte value) {
+  if(last_written_regs[reg] == value) {
+    return;
+  }
   psg_inactive();
   psg_write_reg(reg);
   psg_inactive();
   psg_write_data(value);
   psg_inactive();
-}
-
-void clear_all() {
-  for(int i=0;i<16;i++) {
-    write_reg(i, 0);
-  }
+  last_written_regs[reg] = value;
 }
 
 File ymFile;
+File dir;
 
 char title[21];
 char author[21];
@@ -80,6 +83,24 @@ int frames = 0;
 int frames_loaded = 0;
 int loop_frame = 0;
 int data_start = 0;
+
+int button_next_state = LOW;
+int button_next_last_press = 0;
+int button_prev_state = LOW;
+int button_prev_last_press = 0;
+
+void clear_all() {
+  sdpos = 0;
+  psgpos = 0;
+  for(int i=0;i<sizeof(buffer);i++) {
+    buffer[i] = 0;
+  }
+  for(int i=0;i<16;i++) {
+    last_written_regs[i] = 0xff;
+    write_reg(i, 0);
+  }
+}
+
 
 static inline uint8_t read8() {
   if(ymFile.available()) {
@@ -152,15 +173,11 @@ int read_header() {
 }
 
 int read_until_ym_or_eod() {
-  File dir;
   int reached_current = 0;
 
-  dir = SD.open("/");
-
-  /* We should have an open ymFile here, but let's check. */
-  if(!dir) {
-    return 0;
-  }
+  frames_loaded = 0;
+  dir.rewindDirectory();
+  Serial.println("Searching for next file...");
 
   /* Since the first file is always going to be the root directory
    * (or nothing, but then we've failed already), we'll start looping
@@ -173,14 +190,19 @@ int read_until_ym_or_eod() {
       /* No more files */
       return 0;
     }
+    Serial.print("Testing: ");
+    Serial.println(ymFile.name());
     if(current_file[0] == '\0') {
+      Serial.println("We want the first file...");
       reached_current = 1;
     }
     if(!reached_current) {
       if(!strcmp(ymFile.name(), current_file)) {
 	/* We reached current file, skipping that and going for next */
+	Serial.println("Reached current file, skipping that...");
 	reached_current = 1;
       }
+      ymFile.close();
       continue;
     }
     if(!ymFile.isDirectory() && read_header()) {
@@ -190,6 +212,7 @@ int read_until_ym_or_eod() {
       strcpy(current_file, ymFile.name());
       return 1;
     }
+    ymFile.close();
   }
 }
 
@@ -212,6 +235,8 @@ void setup() {
   pinMode(psgbc1, OUTPUT);
   pinMode(psgbdir, OUTPUT);
   pinMode(CS, OUTPUT);
+  pinMode(BUTTON_NEXT, INPUT);
+  pinMode(BUTTON_PREV, INPUT);
 
   psg_inactive();
   write_reg(7, 255);
@@ -239,6 +264,7 @@ void setup() {
     return;
   }
 
+  dir = SD.open("/");
   current_file[0] = '\0';
 
   read_until_ym_or_eod();
@@ -254,11 +280,20 @@ void read_frame() {
   }
   frames_loaded++;
   if(frames_loaded >= frames) {
+    Serial.print("Reached max frames: ");
+    Serial.print(frames_loaded);
+    Serial.print(" / ");
+    Serial.println(frames);
     /* Look for next file */
+    ymFile.close();
     clear_all();
     if(!read_until_ym_or_eod()) {
       current_file[0] = '\0';
-      read_until_ym_or_eod();
+      if(read_until_ym_or_eod()) {
+	Serial.print("New file open (2): ");
+	Serial.println(ymFile.name());
+	Serial.println(current_file);
+      };
     } else {
       Serial.print("New file open: ");
       Serial.println(ymFile.name());
@@ -266,6 +301,22 @@ void read_frame() {
     }
     //    frames_loaded = loop_frame;
     //    ymFile.seek(data_start+16*loop_frame);
+  }
+
+  if((!button_next_state && digitalRead(BUTTON_NEXT)) &&
+     (button_next_last_press - millis()) > 100) {
+    Serial.println("Button NEXT pressed...");
+    button_next_state = HIGH;
+    clear_all();
+    ymFile.close();
+    if(!read_until_ym_or_eod()) {
+      current_file[0] = '\0';
+      read_until_ym_or_eod();
+    }
+  } else if(button_next_state && !digitalRead(BUTTON_NEXT)) {
+    Serial.println("Button NEXT released...");
+    button_next_state = LOW;
+    button_next_last_press = millis();
   }
 }
 

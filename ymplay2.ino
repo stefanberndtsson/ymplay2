@@ -10,6 +10,9 @@ int psgbdir = A1;
 #define BUTTON_NEXT A3
 #define BUTTON_PREV A4
 
+#define DIR_NEXT 0
+#define DIR_PREV 1
+
 byte last_written_regs[16];
 
 static inline void psg_inactive() {
@@ -172,10 +175,12 @@ int read_header() {
   return 1;
 }
 
-int read_until_ym_or_eod() {
-  int reached_current = 0;
+int read_until_ym_or_eod(int direction) {
+  int fetch_next = 0;
+  char last_scanned[12];
 
   frames_loaded = 0;
+  last_scanned[0] = '\0';
   dir.rewindDirectory();
   Serial.println("Searching for next file...");
 
@@ -183,6 +188,7 @@ int read_until_ym_or_eod() {
    * (or nothing, but then we've failed already), we'll start looping
    * by opening the next file.
    */
+
   while(true) {
     ymFile = dir.openNextFile();
     if(!ymFile) {
@@ -192,13 +198,69 @@ int read_until_ym_or_eod() {
     }
     Serial.print("Testing: ");
     Serial.println(ymFile.name());
+
+    if(direction == DIR_NEXT) {
+      if(current_file[0] == '\0') {
+	fetch_next = 1;
+      }
+
+      if(!ymFile.isDirectory() && read_header()) {
+	/* Valid YM */
+	if(fetch_next) {
+	  Serial.print("Found file: ");
+	  Serial.println(ymFile.name());
+	  strcpy(current_file, ymFile.name());
+	  return 1;
+	} else {
+	  if(!strcmp(current_file, ymFile.name())) {
+	    fetch_next = 1;
+	  }
+	}
+      }
+    } else if(direction == DIR_PREV) {
+      if(current_file[0] == '\0') {
+	fetch_next = 1;
+      }
+
+      if(!ymFile.isDirectory() && read_header()) {
+	/* Valid YM */
+	if(fetch_next) {
+	  Serial.print("Found file: ");
+	  Serial.println(ymFile.name());
+	  strcpy(current_file, ymFile.name());
+	  return 1;
+	} else {
+	  if(!strcmp(current_file, ymFile.name())) {
+	    if(last_scanned[0] != '\0') {
+	      ymFile.close();
+	      ymFile = SD.open(last_scanned);
+	      read_header();
+	      strcpy(current_file, ymFile.name());
+	      return 1;
+	    } else {
+	      current_file[0] = '\0';
+	      ymFile.close();
+	      return 0;
+	    }
+	  }
+	}
+	strcpy(last_scanned, ymFile.name());
+      }
+    }
+    
+    ymFile.close();
+    /*
+
+    if(last_scanned[0] != '\0' && read_header()) {
+      strcpy(last_scanned, ymFile.name());
+    }
     if(current_file[0] == '\0') {
       Serial.println("We want the first file...");
       reached_current = 1;
     }
     if(!reached_current) {
       if(!strcmp(ymFile.name(), current_file)) {
-	/* We reached current file, skipping that and going for next */
+	// We reached current file, skipping that and going for next
 	Serial.println("Reached current file, skipping that...");
 	reached_current = 1;
       }
@@ -206,13 +268,14 @@ int read_until_ym_or_eod() {
       continue;
     }
     if(!ymFile.isDirectory() && read_header()) {
-      /* Found one, let's play it */
+      // Found one, let's play it
       Serial.print("Found file: ");
       Serial.println(ymFile.name());
       strcpy(current_file, ymFile.name());
       return 1;
     }
     ymFile.close();
+*/
   }
 }
 
@@ -267,7 +330,7 @@ void setup() {
   dir = SD.open("/");
   current_file[0] = '\0';
 
-  read_until_ym_or_eod();
+  read_until_ym_or_eod(DIR_NEXT);
 }
 
 void read_frame() {
@@ -287,9 +350,9 @@ void read_frame() {
     /* Look for next file */
     ymFile.close();
     clear_all();
-    if(!read_until_ym_or_eod()) {
+    if(!read_until_ym_or_eod(DIR_NEXT)) {
       current_file[0] = '\0';
-      if(read_until_ym_or_eod()) {
+      if(read_until_ym_or_eod(DIR_NEXT)) {
 	Serial.print("New file open (2): ");
 	Serial.println(ymFile.name());
 	Serial.println(current_file);
@@ -309,14 +372,29 @@ void read_frame() {
     button_next_state = HIGH;
     clear_all();
     ymFile.close();
-    if(!read_until_ym_or_eod()) {
+    if(!read_until_ym_or_eod(DIR_NEXT)) {
       current_file[0] = '\0';
-      read_until_ym_or_eod();
+      read_until_ym_or_eod(DIR_NEXT);
     }
   } else if(button_next_state && !digitalRead(BUTTON_NEXT)) {
     Serial.println("Button NEXT released...");
     button_next_state = LOW;
     button_next_last_press = millis();
+  }
+  if((!button_prev_state && digitalRead(BUTTON_PREV)) &&
+     (button_prev_last_press - millis()) > 100) {
+    Serial.println("Button PREV pressed...");
+    button_prev_state = HIGH;
+    clear_all();
+    ymFile.close();
+    if(!read_until_ym_or_eod(DIR_PREV)) {
+      current_file[0] = '\0';
+      read_until_ym_or_eod(DIR_PREV);
+    }
+  } else if(button_prev_state && !digitalRead(BUTTON_PREV)) {
+    Serial.println("Button PREV released...");
+    button_prev_state = LOW;
+    button_prev_last_press = millis();
   }
 }
 

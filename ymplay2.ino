@@ -205,6 +205,19 @@ void eeprom_write() {
   }
 }
 
+void print_frames_in_time(int frames) {
+  uint16_t sec;
+  byte min;
+  sec = frames/50;
+  min = sec/60;
+  sec = sec-min*60;
+  if(min < 10) lcd.print("0");
+  lcd.print(min);
+  lcd.print(":");
+  if(sec < 10) lcd.print("0");
+  lcd.print(sec);
+}
+
 void print_header() {
   lcd.clear();
   lcd.setCursor(0,0);
@@ -397,6 +410,8 @@ void setup() {
     read_header();
     print_header();
   } 
+  lcd.setCursor(0,3);
+  lcd.print("                    ");
   if(current_file[0] == '\0') {
     read_until_ym_or_eod(DIR_NEXT);
   }
@@ -441,13 +456,11 @@ void read_frame() {
 void loop() {
   while(((sdpos+128-psgpos)&0x7f) < 64) {
     read_frame();
-    if(frames_loaded%100 == 0) {
+    if(frames_loaded%25 == 0) {
       lcd.setCursor(0,3);
-      lcd.print("                    ");
-      lcd.setCursor(0,3);
-      lcd.print(frames_loaded);
+      print_frames_in_time(frames_loaded);
       lcd.print(" / ");
-      lcd.print(frames);
+      print_frames_in_time(frames);
     }
   }
 

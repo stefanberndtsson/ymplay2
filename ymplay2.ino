@@ -1,7 +1,19 @@
 #include <SD/SD.h>
+#include <LiquidCrystal/LiquidCrystal.h>
 
 int psgbc1 = A0;
 int psgbdir = A1;
+
+#define SHIFT_DATA 2
+#define SHIFT_CLOCK 3
+#define SHIFT_LATCH 4
+
+#define LCD_D4 5
+#define LCD_D5 6
+#define LCD_D6 7
+#define LCD_D7 8
+#define LCD_RS A2
+#define LCD_E 9
 
 #define CS 10
 #define MOSI 11
@@ -16,16 +28,16 @@ int psgbdir = A1;
 byte last_written_regs[16];
 
 static inline void psg_inactive() {
-  PORTC=0;
-  delayMicroseconds(3);
-/*
   digitalWrite(psgbc1, LOW);
   digitalWrite(psgbdir, LOW);
-  */
+  delayMicroseconds(3);
 }
 
 static inline void psg_write_byte(byte value) {
-  PORTD=((value<<2)&~3)|(PIND&3);
+  digitalWrite(SHIFT_LATCH, LOW);
+  shiftOut(SHIFT_DATA, SHIFT_CLOCK, MSBFIRST, value);
+  digitalWrite(SHIFT_LATCH, HIGH);
+  //  PORTD=((value<<2)&~3)|(PIND&3);
   /*  PORTB=(PINB&~3)|((value>>6)&3);*/
 /*
   digitalWrite(2, (value>>0)&1);
@@ -35,29 +47,23 @@ static inline void psg_write_byte(byte value) {
   digitalWrite(6, (value>>4)&1);
   digitalWrite(7, (value>>5)&1);
 */
-  digitalWrite(8, (value>>6)&1);
-  digitalWrite(9, (value>>7)&1);
+//  digitalWrite(8, (value>>6)&1);
+//  digitalWrite(9, (value>>7)&1);
   
 }
 
 static inline void psg_write_reg(byte reg) {
   psg_write_byte(reg);
-  PORTC=3;
-  delayMicroseconds(3);
-/*
   digitalWrite(psgbc1, HIGH);
   digitalWrite(psgbdir, HIGH);
-  */
+  delayMicroseconds(3);
 }
 
 static inline void psg_write_data(byte value) {
   psg_write_byte(value);
-  PORTC=2;
-  delayMicroseconds(3);
-/*
   digitalWrite(psgbc1, LOW);
   digitalWrite(psgbdir, HIGH);
-  */
+  delayMicroseconds(3);
 }
 
 void write_reg(byte reg, byte value) {
@@ -71,6 +77,8 @@ void write_reg(byte reg, byte value) {
   psg_inactive();
   last_written_regs[reg] = value;
 }
+
+LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 File ymFile;
 File dir;
@@ -175,6 +183,16 @@ int read_header() {
   return 1;
 }
 
+void print_header() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(title);
+  lcd.setCursor(0,1);
+  lcd.print(author);
+  lcd.setCursor(0,2);
+  lcd.print(convertor);
+}
+
 int read_until_ym_or_eod(int direction) {
   int fetch_next = 0;
   char last_scanned[12];
@@ -210,6 +228,7 @@ int read_until_ym_or_eod(int direction) {
 	  Serial.print("Found file: ");
 	  Serial.println(ymFile.name());
 	  strcpy(current_file, ymFile.name());
+	  print_header();
 	  return 1;
 	} else {
 	  if(!strcmp(current_file, ymFile.name())) {
@@ -228,6 +247,7 @@ int read_until_ym_or_eod(int direction) {
 	  Serial.print("Found file: ");
 	  Serial.println(ymFile.name());
 	  strcpy(current_file, ymFile.name());
+	  print_header();
 	  return 1;
 	} else {
 	  if(!strcmp(current_file, ymFile.name())) {
@@ -236,6 +256,7 @@ int read_until_ym_or_eod(int direction) {
 	      ymFile = SD.open(last_scanned);
 	      read_header();
 	      strcpy(current_file, ymFile.name());
+	      print_header();
 	      return 1;
 	    } else {
 	      current_file[0] = '\0';
@@ -282,11 +303,15 @@ int read_until_ym_or_eod(int direction) {
 
 ISR(TIMER1_COMPA_vect)
 {
+  cli();
+  digitalWrite(A5, HIGH);
   for(int i=0;i<16;i++) {
     write_reg(i, buffer[(psgpos+i)&0x7f]);
   }
   psgpos+=16;
   psgpos &= 0x7f;
+  digitalWrite(A5, LOW);
+  sei();
 }
 
 void printDirectory(File, int);
@@ -300,6 +325,8 @@ void setup() {
   pinMode(CS, OUTPUT);
   pinMode(BUTTON_NEXT, INPUT);
   pinMode(BUTTON_PREV, INPUT);
+  pinMode(A5,OUTPUT);
+  digitalWrite(A5,LOW);
 
   psg_inactive();
   write_reg(7, 255);
@@ -329,6 +356,8 @@ void setup() {
 
   dir = SD.open("/");
   current_file[0] = '\0';
+
+  lcd.begin(20,4);
 
   read_until_ym_or_eod(DIR_NEXT);
 }
@@ -366,6 +395,22 @@ void read_frame() {
     //    ymFile.seek(data_start+16*loop_frame);
   }
 
+}
+
+
+void loop() {
+  while(((sdpos+128-psgpos)&0x7f) < 64) {
+    read_frame();
+    if(frames_loaded%100 == 0) {
+      lcd.setCursor(0,3);
+      lcd.print("                    ");
+      lcd.setCursor(0,3);
+      lcd.print(frames_loaded);
+      lcd.print(" / ");
+      lcd.print(frames);
+    }
+  }
+
   if((!button_next_state && digitalRead(BUTTON_NEXT)) &&
      (button_next_last_press - millis()) > 100) {
     Serial.println("Button NEXT pressed...");
@@ -395,12 +440,5 @@ void read_frame() {
     Serial.println("Button PREV released...");
     button_prev_state = LOW;
     button_prev_last_press = millis();
-  }
-}
-
-
-void loop() {
-  while(((sdpos+128-psgpos)&0x7f) < 64) {
-    read_frame();
   }
 }

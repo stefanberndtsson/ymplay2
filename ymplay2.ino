@@ -236,6 +236,12 @@ int read_until_ym_or_eod(int direction) {
       /* No more files */
       return 0;
     }
+
+    if(ymFile.isDirectory()) {
+      ymFile.close();
+      continue;
+    }
+
     Serial.print("Testing: ");
     Serial.println(ymFile.name());
 
@@ -244,19 +250,16 @@ int read_until_ym_or_eod(int direction) {
 	fetch_next = 1;
       }
 
-      if(!ymFile.isDirectory() && read_header()) {
-	/* Valid YM */
-	if(fetch_next) {
-	  Serial.print("Found file: ");
-	  Serial.println(ymFile.name());
-	  strcpy(current_file, ymFile.name());
-	  eeprom_write();
-	  print_header();
-	  return 1;
-	} else {
-	  if(!strcmp(current_file, ymFile.name())) {
-	    fetch_next = 1;
-	  }
+      if(fetch_next && read_header()) {
+	Serial.print("Found file: ");
+	Serial.println(ymFile.name());
+	strcpy(current_file, ymFile.name());
+	eeprom_write();
+	print_header();
+	return 1;
+      } else {
+	if(!strcmp(current_file, ymFile.name())) {
+	  fetch_next = 1;
 	}
       }
     } else if(direction == DIR_PREV) {
@@ -383,7 +386,7 @@ void setup() {
   current_file[0] = '\0';
   lcd.begin(20,4);
   
-  if(eeprom_read()) {
+  if(!digitalRead(BUTTON_PREV) && eeprom_read()) {
     Serial.print("Read from EEPROM: ");
     Serial.println(current_file);
     ymFile = SD.open(current_file);

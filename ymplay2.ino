@@ -1,5 +1,6 @@
 #include <SD/SD.h>
 #include <LiquidCrystal/LiquidCrystal.h>
+#include <EEPROM/EEPROM.h>
 
 int psgbc1 = A0;
 int psgbdir = A1;
@@ -183,6 +184,27 @@ int read_header() {
   return 1;
 }
 
+int eeprom_read() {
+  if(EEPROM.read(0) != 'Y') return 0;
+  if(EEPROM.read(1) != 'M') return 0;
+  if(EEPROM.read(2) != '5') return 0;
+  if(EEPROM.read(3) != '!') return 0;
+  for(int i=0;i<sizeof(current_file);i++) {
+    current_file[i] = EEPROM.read(i+4);
+  }
+  return 1;
+}
+
+void eeprom_write() {
+  EEPROM.write(0, 'Y');
+  EEPROM.write(1, 'M');
+  EEPROM.write(2, '5');
+  EEPROM.write(3, '!');
+  for(int i=0;i<sizeof(current_file);i++) {
+    EEPROM.write(i+4, current_file[i]);
+  }
+}
+
 void print_header() {
   lcd.clear();
   lcd.setCursor(0,0);
@@ -228,6 +250,7 @@ int read_until_ym_or_eod(int direction) {
 	  Serial.print("Found file: ");
 	  Serial.println(ymFile.name());
 	  strcpy(current_file, ymFile.name());
+	  eeprom_write();
 	  print_header();
 	  return 1;
 	} else {
@@ -247,6 +270,7 @@ int read_until_ym_or_eod(int direction) {
 	  Serial.print("Found file: ");
 	  Serial.println(ymFile.name());
 	  strcpy(current_file, ymFile.name());
+	  eeprom_write();
 	  print_header();
 	  return 1;
 	} else {
@@ -256,6 +280,7 @@ int read_until_ym_or_eod(int direction) {
 	      ymFile = SD.open(last_scanned);
 	      read_header();
 	      strcpy(current_file, ymFile.name());
+	      eeprom_write();
 	      print_header();
 	      return 1;
 	    } else {
@@ -356,10 +381,22 @@ void setup() {
 
   dir = SD.open("/");
   current_file[0] = '\0';
-
   lcd.begin(20,4);
-
-  read_until_ym_or_eod(DIR_NEXT);
+  
+  if(eeprom_read()) {
+    Serial.print("Read from EEPROM: ");
+    Serial.println(current_file);
+    ymFile = SD.open(current_file);
+    if(!ymFile) {
+      Serial.println("Could not open file.");
+      current_file[0] = '\0';
+    }
+    read_header();
+    print_header();
+  } 
+  if(current_file[0] == '\0') {
+    read_until_ym_or_eod(DIR_NEXT);
+  }
 }
 
 void read_frame() {

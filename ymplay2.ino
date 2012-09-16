@@ -28,6 +28,21 @@ int psgbdir = A1;
 
 byte last_written_regs[16];
 
+#define CLR(x,y) (x&=(~(1<<y)))
+#define SET(x,y) (x|=(1<<y))
+
+static inline void myshiftOut(byte value) {
+  for(int i=0;i<8;i++) {
+    if(value&(1<<(7-i))) {
+      SET(PORTD,SHIFT_DATA);
+    } else {
+      CLR(PORTD,SHIFT_DATA);
+    }
+    SET(PORTD,SHIFT_CLOCK);
+    CLR(PORTD,SHIFT_CLOCK);
+  }
+}
+
 static inline void psg_inactive() {
   digitalWrite(psgbc1, LOW);
   digitalWrite(psgbdir, LOW);
@@ -36,7 +51,8 @@ static inline void psg_inactive() {
 
 static inline void psg_write_byte(byte value) {
   digitalWrite(SHIFT_LATCH, LOW);
-  shiftOut(SHIFT_DATA, SHIFT_CLOCK, MSBFIRST, value);
+  //  shiftOut(SHIFT_DATA, SHIFT_CLOCK, MSBFIRST, value);
+  myshiftOut(value);
   digitalWrite(SHIFT_LATCH, HIGH);
   //  PORTD=((value<<2)&~3)|(PIND&3);
   /*  PORTB=(PINB&~3)|((value>>6)&3);*/
@@ -345,7 +361,6 @@ char reg_order[16] = {0, 1, 8, 2, 3, 9, 4, 5, 10, 7, 6, 11, 12, 13, 14, 15};
 
 ISR(TIMER1_COMPA_vect)
 {
-  cli();
   digitalWrite(A5, HIGH);
   for(int i=0;i<14;i++) {
     write_reg(reg_order[i], buffer[(psgpos+reg_order[i])&0x7f]);
@@ -353,7 +368,6 @@ ISR(TIMER1_COMPA_vect)
   psgpos+=16;
   psgpos &= 0x7f;
   digitalWrite(A5, LOW);
-  sei();
 }
 
 void printDirectory(File, int);
@@ -362,6 +376,9 @@ void setup() {
   for(int i=2;i<=9;i++) {
     pinMode(i, OUTPUT);
   }
+  pinMode(SHIFT_DATA, OUTPUT);
+  pinMode(SHIFT_CLOCK, OUTPUT);
+  pinMode(SHIFT_LATCH, OUTPUT);
   pinMode(psgbc1, OUTPUT);
   pinMode(psgbdir, OUTPUT);
   pinMode(CS, OUTPUT);

@@ -341,13 +341,14 @@ int read_until_ym_or_eod(int direction) {
   }
 }
 
+char reg_order[16] = {0, 1, 8, 2, 3, 9, 4, 5, 10, 7, 6, 11, 12, 13, 14, 15};
 
 ISR(TIMER1_COMPA_vect)
 {
   cli();
   digitalWrite(A5, HIGH);
-  for(int i=0;i<16;i++) {
-    write_reg(i, buffer[(psgpos+i)&0x7f]);
+  for(int i=0;i<14;i++) {
+    write_reg(reg_order[i], buffer[(psgpos+reg_order[i])&0x7f]);
   }
   psgpos+=16;
   psgpos &= 0x7f;

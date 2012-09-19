@@ -84,7 +84,7 @@ static inline void psg_write_data(byte value) {
 }
 
 void write_reg(byte reg, byte value) {
-  if(last_written_regs[reg] == value) {
+  if(last_written_regs[reg] == value && reg != 13) {
     return;
   }
   psg_inactive();
@@ -361,9 +361,12 @@ char reg_order[16] = {0, 1, 8, 2, 3, 9, 4, 5, 10, 7, 6, 11, 12, 13, 14, 15};
 
 ISR(TIMER1_COMPA_vect)
 {
+  byte value;
   digitalWrite(A5, HIGH);
   for(int i=0;i<14;i++) {
-    write_reg(reg_order[i], buffer[(psgpos+reg_order[i])&0x7f]);
+    value = buffer[(psgpos+reg_order[i])&0x7f];
+    if(reg_order[i] == 13 && value == 0xff) continue;
+    write_reg(reg_order[i], value);
   }
   psgpos+=16;
   psgpos &= 0x7f;

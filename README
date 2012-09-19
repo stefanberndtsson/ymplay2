@@ -1,0 +1,8 @@
+Player for unpacked, non-interleaved YM5! files using an Arduino and an AY-3-891x chip.
+
+Used libraries are:
+
+EEPROM, LiquidCrystal and SD. Copyrights for these are as they are in the Arduino ubuntu
+package.
+
+Copyright for the rest, do as you wish, I don't care.

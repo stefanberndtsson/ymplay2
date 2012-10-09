@@ -1,101 +1,56 @@
 #include <SD/SD.h>
-#include <LiquidCrystal/LiquidCrystal.h>
+#include <Wire/Wire.h>
 #include <EEPROM/EEPROM.h>
 
 int psgbc1 = A0;
 int psgbdir = A1;
 
-#define SHIFT_DATA 2
-#define SHIFT_CLOCK 3
-#define SHIFT_LATCH 4
-
-#define LCD_D4 5
-#define LCD_D5 6
-#define LCD_D6 7
-#define LCD_D7 8
-#define LCD_RS A2
-#define LCD_E 9
+#define LCD_ADDR 0x42
+#define LCD_BEGIN 0x80
+#define LCD_CLEAR 0x81
+#define LCD_PRINT 0x82
+#define LCD_SETCURSOR 0x83
 
 #define CS 10
 #define MOSI 11
 #define MISO 12
 #define SCK 13
 #define BUTTON_NEXT A3
-#define BUTTON_PREV A4
+#define BUTTON_PREV A2
 
 #define DIR_NEXT 0
 #define DIR_PREV 1
 
 byte last_written_regs[16];
 
-#define CLR(x,y) (x&=(~(1<<y)))
-#define SET(x,y) (x|=(1<<y))
-
-static inline void myshiftOut(byte value) {
-  for(int i=0;i<8;i++) {
-    if(value&(1<<(7-i))) {
-      SET(PORTD,SHIFT_DATA);
-    } else {
-      CLR(PORTD,SHIFT_DATA);
-    }
-    SET(PORTD,SHIFT_CLOCK);
-    CLR(PORTD,SHIFT_CLOCK);
-  }
-}
-
 static inline void psg_inactive() {
-  digitalWrite(psgbc1, LOW);
-  digitalWrite(psgbdir, LOW);
-  delayMicroseconds(3);
+  PORTC=(PINC&~3);
 }
 
 static inline void psg_write_byte(byte value) {
-  digitalWrite(SHIFT_LATCH, LOW);
-  //  shiftOut(SHIFT_DATA, SHIFT_CLOCK, MSBFIRST, value);
-  myshiftOut(value);
-  digitalWrite(SHIFT_LATCH, HIGH);
-  //  PORTD=((value<<2)&~3)|(PIND&3);
-  /*  PORTB=(PINB&~3)|((value>>6)&3);*/
-/*
-  digitalWrite(2, (value>>0)&1);
-  digitalWrite(3, (value>>1)&1);
-  digitalWrite(4, (value>>2)&1);
-  digitalWrite(5, (value>>3)&1);
-  digitalWrite(6, (value>>4)&1);
-  digitalWrite(7, (value>>5)&1);
-*/
-//  digitalWrite(8, (value>>6)&1);
-//  digitalWrite(9, (value>>7)&1);
-  
+  PORTD=((value<<2)&~3)|(PIND&3);
+  PORTB=(PINB&~3)|((value>>6)&3);
 }
 
 static inline void psg_write_reg(byte reg) {
   psg_write_byte(reg);
-  digitalWrite(psgbc1, HIGH);
-  digitalWrite(psgbdir, HIGH);
-  delayMicroseconds(3);
+  PORTC=(PINC&~3)|3;
 }
 
 static inline void psg_write_data(byte value) {
   psg_write_byte(value);
-  digitalWrite(psgbc1, LOW);
-  digitalWrite(psgbdir, HIGH);
-  delayMicroseconds(3);
+  PORTC=(PINC&~3)|2;
 }
 
 void write_reg(byte reg, byte value) {
-  if(last_written_regs[reg] == value && reg != 13) {
-    return;
-  }
   psg_inactive();
   psg_write_reg(reg);
   psg_inactive();
   psg_write_data(value);
   psg_inactive();
-  last_written_regs[reg] = value;
 }
 
-LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+// LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 File ymFile;
 File dir;
@@ -103,8 +58,8 @@ File dir;
 char title[21];
 char author[21];
 char convertor[21];
-byte buffer[128];
 char current_file[12];
+byte buffer[128];
 volatile byte sdpos = 0;
 volatile byte psgpos = 0;
 int frames = 0;
@@ -164,8 +119,14 @@ int read_header() {
   Serial.print("Checking file: ");
   Serial.println(ymFile.name());
   // Skip first bits
-  if(read32() != 0x594d3521) { /* YM5! */
+  uint32_t tmp;
+  tmp = read32();
+  if(tmp != 0x594d3521) { /* YM5! */
     Serial.println("Not YM5!");
+    Serial.println((unsigned char)(tmp>>24), HEX);
+    Serial.println((unsigned char)(tmp>>16), HEX);
+    Serial.println((unsigned char)(tmp>>8), HEX);
+    Serial.println((unsigned char)(tmp), HEX);
     return 0;
   }
   if(read32() != 0x4c654f6e) { /* LeOn */
@@ -221,27 +182,69 @@ void eeprom_write() {
   }
 }
 
+void lcd_begin(byte cols, byte rows) {
+  Wire.beginTransmission(LCD_ADDR);
+  Wire.write(LCD_BEGIN);
+  Wire.write(cols);
+  Wire.write(rows);
+  Wire.endTransmission();
+}
+
+void lcd_clear() {
+  Wire.beginTransmission(LCD_ADDR);
+  Wire.write(LCD_CLEAR);
+  Wire.endTransmission();
+}
+
+void lcd_setcursor(byte col, byte row) {
+  Wire.beginTransmission(LCD_ADDR);
+  Wire.write(LCD_SETCURSOR);
+  Wire.write(col);
+  Wire.write(row);
+  Wire.endTransmission();
+}
+
+void lcd_print_string(char *str) {
+  Wire.beginTransmission(LCD_ADDR);
+  Wire.write(LCD_PRINT);
+  for(int i=0;i<strlen(str);i++) {
+    Wire.write(str[i]);
+  }
+  Wire.endTransmission();
+}
+
+void lcd_print_padded_two_decimal(byte value) {
+  Wire.beginTransmission(LCD_ADDR);
+  Wire.write(LCD_PRINT);
+
+  byte high = (value%100)/10;
+  byte low = (value%10);
+  Wire.write(high+'0');
+  Wire.write(low+'0');
+  Wire.endTransmission();
+}
+
 void print_frames_in_time(int frames) {
   uint16_t sec;
   byte min;
   sec = frames/50;
   min = sec/60;
   sec = sec-min*60;
-  if(min < 10) lcd.print("0");
-  lcd.print(min);
-  lcd.print(":");
-  if(sec < 10) lcd.print("0");
-  lcd.print(sec);
+  lcd_print_padded_two_decimal(min);
+  lcd_print_string(":");
+  lcd_print_padded_two_decimal(sec);
 }
 
 void print_header() {
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print(title);
-  lcd.setCursor(0,1);
-  lcd.print(author);
-  lcd.setCursor(0,2);
-  lcd.print(convertor);
+  Serial.println("Print header...");
+  lcd_clear();
+  lcd_setcursor(0,0);
+  lcd_print_string(title);
+  lcd_setcursor(0,1);
+  lcd_print_string(author);
+  lcd_setcursor(0,2);
+  lcd_print_string(convertor);
+  Serial.println("Print header... done...");
 }
 
 int read_until_ym_or_eod(int direction) {
@@ -357,20 +360,26 @@ int read_until_ym_or_eod(int direction) {
   }
 }
 
-char reg_order[16] = {0, 1, 8, 2, 3, 9, 4, 5, 10, 7, 6, 11, 12, 13, 14, 15};
+char reg_order[16] = {7, 0, 1, 8, 2, 3, 9, 4, 5, 10, 6, 11, 12, 13, 14, 15};
+
+#define REORDER 0
 
 ISR(TIMER1_COMPA_vect)
 {
   byte value;
-  digitalWrite(A5, HIGH);
   for(int i=0;i<14;i++) {
-    value = buffer[(psgpos+reg_order[i])&0x7f];
+#if REORDER
+    value = buffer[(psgpos+reg_order[i])&(sizeof(buffer)-1)];
     if(reg_order[i] == 13 && value == 0xff) continue;
     write_reg(reg_order[i], value);
+#else
+    value = buffer[(psgpos+i)&(sizeof(buffer)-1)];
+    if(i == 13 && value == 0xff) continue;
+    write_reg(i, value);
+#endif
   }
   psgpos+=16;
-  psgpos &= 0x7f;
-  digitalWrite(A5, LOW);
+  psgpos &= (sizeof(buffer)-1);
 }
 
 void printDirectory(File, int);
@@ -379,16 +388,13 @@ void setup() {
   for(int i=2;i<=9;i++) {
     pinMode(i, OUTPUT);
   }
-  pinMode(SHIFT_DATA, OUTPUT);
-  pinMode(SHIFT_CLOCK, OUTPUT);
-  pinMode(SHIFT_LATCH, OUTPUT);
   pinMode(psgbc1, OUTPUT);
   pinMode(psgbdir, OUTPUT);
   pinMode(CS, OUTPUT);
   pinMode(BUTTON_NEXT, INPUT);
   pinMode(BUTTON_PREV, INPUT);
-  pinMode(A5,OUTPUT);
-  digitalWrite(A5,LOW);
+  delay(4000);
+  Wire.begin();
 
   psg_inactive();
   write_reg(7, 255);
@@ -399,6 +405,19 @@ void setup() {
 
   pinMode(13, OUTPUT);
 
+  if (!SD.begin(CS)) {
+    Serial.println("initialization failed!");
+    return;
+  } else {
+    //    Serial.println("SD ok...");
+  }
+
+  dir = SD.open("/");
+  current_file[0] = '\0';
+  //  Serial.println("Initializing LCD...");
+  lcd_begin(20,4);
+  //  Serial.println("LCD done...");
+  
   /* Set timer to 50Hz */
   cli();
   TCCR1A = 0;
@@ -410,16 +429,6 @@ void setup() {
   TIMSK1 |= (1 << OCIE1A);
   sei();
 
-  
-  if (!SD.begin(CS)) {
-    Serial.println("initialization failed!");
-    return;
-  }
-
-  dir = SD.open("/");
-  current_file[0] = '\0';
-  lcd.begin(20,4);
-  
   if(!digitalRead(BUTTON_PREV) && eeprom_read()) {
     Serial.print("Read from EEPROM: ");
     Serial.println(current_file);
@@ -431,8 +440,8 @@ void setup() {
     read_header();
     print_header();
   } 
-  lcd.setCursor(0,3);
-  lcd.print("                    ");
+  lcd_setcursor(0,3);
+  lcd_print_string("                    ");
   if(current_file[0] == '\0') {
     read_until_ym_or_eod(DIR_NEXT);
   }
@@ -458,14 +467,14 @@ void read_frame() {
     if(!read_until_ym_or_eod(DIR_NEXT)) {
       current_file[0] = '\0';
       if(read_until_ym_or_eod(DIR_NEXT)) {
-	Serial.print("New file open (2): ");
-	Serial.println(ymFile.name());
-	Serial.println(current_file);
+	//	Serial.print("New file open (2): ");
+	//	Serial.println(ymFile.name());
+	//	Serial.println(current_file);
       };
     } else {
-      Serial.print("New file open: ");
-      Serial.println(ymFile.name());
-      Serial.println(current_file);
+      //      Serial.print("New file open: ");
+      //      Serial.println(ymFile.name());
+      //      Serial.println(current_file);
     }
     //    frames_loaded = loop_frame;
     //    ymFile.seek(data_start+16*loop_frame);
@@ -475,19 +484,19 @@ void read_frame() {
 
 
 void loop() {
-  while(((sdpos+128-psgpos)&0x7f) < 64) {
+  while(((sdpos+sizeof(buffer)-psgpos)&(sizeof(buffer)-1)) < (sizeof(buffer)/2)) {
     read_frame();
     if(frames_loaded%25 == 0) {
-      lcd.setCursor(0,3);
+      lcd_setcursor(0,3);
       print_frames_in_time(frames_loaded);
-      lcd.print(" / ");
+      lcd_print_string(" / ");
       print_frames_in_time(frames);
     }
   }
 
   if((!button_next_state && digitalRead(BUTTON_NEXT)) &&
      (button_next_last_press - millis()) > 100) {
-    Serial.println("Button NEXT pressed...");
+    //    Serial.println("Button NEXT pressed...");
     button_next_state = HIGH;
     clear_all();
     ymFile.close();
@@ -496,13 +505,13 @@ void loop() {
       read_until_ym_or_eod(DIR_NEXT);
     }
   } else if(button_next_state && !digitalRead(BUTTON_NEXT)) {
-    Serial.println("Button NEXT released...");
+    //    Serial.println("Button NEXT released...");
     button_next_state = LOW;
     button_next_last_press = millis();
   }
   if((!button_prev_state && digitalRead(BUTTON_PREV)) &&
      (button_prev_last_press - millis()) > 100) {
-    Serial.println("Button PREV pressed...");
+    //    Serial.println("Button PREV pressed...");
     button_prev_state = HIGH;
     clear_all();
     ymFile.close();
@@ -511,7 +520,7 @@ void loop() {
       read_until_ym_or_eod(DIR_PREV);
     }
   } else if(button_prev_state && !digitalRead(BUTTON_PREV)) {
-    Serial.println("Button PREV released...");
+    //    Serial.println("Button PREV released...");
     button_prev_state = LOW;
     button_prev_last_press = millis();
   }
